@@ -55,7 +55,7 @@ class BlueTeleOp : NextFTCOpMode() {
     override fun onInit() {
         //follower.setStartingPose(Drive.lastKnown)
         follower.pose = Pose(72.0,72.0,0.0)
-    //follower.pose = Pose(40.7, 12.5, 90.0)
+        //follower.pose = Pose(40.7, 12.5, 90.0)
         // webb blue start      follower.pose = Pose(3.0, 15.0, Math.toRadians(180.0))
     }
 
@@ -116,7 +116,7 @@ class BlueTeleOp : NextFTCOpMode() {
         PanelsTelemetry.telemetry.addData("Flywheel/At Target",    isAtTarget())
         PanelsTelemetry.telemetry.addData("Flywheel/Voltage",      "%.2f".format(voltFilt))
         PanelsTelemetry.telemetry.addData("Flywheel/Volt Comp On", voltageCompEnabled)
-      joinedTelemetry.update()
+        joinedTelemetry.update()
         Drive.poseValid = true
         currentMode = AimModeTele.ODO
         Drive.currentX = PedroComponent.Companion.follower.pose.x
