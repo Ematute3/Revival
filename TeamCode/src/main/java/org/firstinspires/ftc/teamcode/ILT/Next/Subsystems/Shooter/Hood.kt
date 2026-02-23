@@ -121,6 +121,9 @@ object Hood : Subsystem {
         val angle = calculateAnglePhysics(distanceMeters, velocityMps)
         setAngle(angle)
     }
+    fun setPosition(position1: Double) {
+        hoodServo.position = position1
+    }
 
     // ==================== PERIODIC ====================
     override fun periodic() {

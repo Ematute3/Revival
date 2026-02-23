@@ -22,12 +22,13 @@ import org.firstinspires.ftc.teamcode.ILT.Next.Data.Alliance
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Drive
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Gate
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Intake
+import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Shooter.Hood
 
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Shooter.Turret
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Shooter.Turret.alliance
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants
 import org.firstinspires.ftc.teamcode.subsystem.FlyWheel
-import org.firstinspires.ftc.teamcode.subsystem.Hood
+
 import java.lang.StrictMath.toRadians
 
 
