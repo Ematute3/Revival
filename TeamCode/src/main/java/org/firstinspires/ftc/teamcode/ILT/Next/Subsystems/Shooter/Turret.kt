@@ -1,23 +1,25 @@
 package org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Shooter
 
+import com.bylazar.telemetry.PanelsTelemetry.telemetry
 import com.qualcomm.robotcore.hardware.DcMotor
 import com.qualcomm.robotcore.util.ElapsedTime
+
 import dev.nextftc.control.KineticState
 import dev.nextftc.control.builder.controlSystem
 import dev.nextftc.core.subsystems.Subsystem
 import dev.nextftc.hardware.impl.MotorEx
+
 import org.firstinspires.ftc.teamcode.ILT.Next.Data.Alliance
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Drive.currentHeading
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Drive.currentX
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Drive.currentY
 import org.firstinspires.ftc.teamcode.ILT.Next.Subsystems.Drive.poseValid
-import java.lang.Math.toRadians
+
 import kotlin.math.*
 
 object Turret : Subsystem {
-
+    // ==================== HARDWARE ====================
     enum class State { IDLE, MANUAL, ODOMETRY, RESET_HEADING }
-
     var motor = MotorEx("turret")
     @JvmField var alliance = Alliance.RED
 
@@ -29,28 +31,49 @@ object Turret : Subsystem {
     var manualPower = 0.0
     var currentState = State.IDLE
 
-    const val FIELD_SIZE = 144.0
+    // ==================== PHYSICS VARIABLES - MEASURE THESE ====================
+    // MEASURE: Motor encoder ticks per revolution (FROM MOTOR SPEC)
+    val motorTicksPerRev = 537.7 // goBILDA 1172 or similar - CHECK YOUR MOTOR
 
-    // Goal positions (will be adjusted based on alliance)
+    // MEASURE: Count teeth on motor gear
+    @JvmField var motorGearTeeth = 20 // COUNT TEETH
+
+    // MEASURE: Count teeth on output gear
+    @JvmField var outputGearTeeth = 86 // COUNT TEETH
+
+    // CALCULATED: Gear ratio
+    val gearRatio: Double get() = outputGearTeeth.toDouble() / motorGearTeeth.toDouble()
+
+    // CALCULATED: Degrees per tick
+    val degreesPerTick: Double get() = (1.0 / motorTicksPerRev) * gearRatio * 360.0
+
+    // CALCULATED: Radians per tick
+    private val RADIANS_PER_TICK: Double
+        get() = (2.0 * Math.PI) / (motorTicksPerRev * gearRatio)
+    // MEASURE: Turret offset from robot center (if any)
+
+    @JvmField var turretOffsetX = 0.0 // inches
+    @JvmField var turretOffsetY = 0.0 // inches
+
+    // ==================== FIELD CONSTANTS ====================
+    const val FIELD_SIZE = 144.0 // inches
+
+    // Goal positions
     const val GOAL_Y = 144.0
     const val RED_GOAL_X = 144.0
     const val BLUE_GOAL_X = 0.0
 
-    val goalX: Double
-        get() = if (alliance == Alliance.RED) RED_GOAL_X else BLUE_GOAL_X
+    val goalX: Double get() = if (alliance == Alliance.RED) RED_GOAL_X else BLUE_GOAL_X
     val goalY: Double = GOAL_Y
 
+    // ==================== TUNABLE ====================
     @JvmField var minPower: Double = 0.15
     @JvmField var maxPower: Double = 0.75
-    @JvmField var alignmentTolerance: Double = 2.0
+    @JvmField var alignmentTolerance: Double = 2.0 // degrees
     @JvmField var visionGain: Double = 0.4
     @JvmField var kV: Double = 0.25
 
-    const val GEAR_RATIO = 3.62068965517
-    const val MOTOR_TICKS_PER_REV = 537.7
-    private const val RADIANS_PER_TICK = 2.0 * PI / (MOTOR_TICKS_PER_REV * GEAR_RATIO)
-
-    // State Tracking
+    // ==================== STATE ====================
     private val velTimer = ElapsedTime()
     private var lastRobotHeading = 0.0
     private var robotAngularVelocity = 0.0
@@ -58,13 +81,11 @@ object Turret : Subsystem {
 
     const val MIN_ANGLE = -3 * PI / 4
     const val MAX_ANGLE = 3 * PI / 4
-
     var turretYaw: Double = 0.0
 
-    // Reset heading constants
-    private const val RESET_TARGET_YAW = 0.0          // ← change this (e.g. Math.toRadians(90.0))
-    // ~3°
+    private const val RESET_TARGET_YAW = 0.0
 
+    // ==================== INITIALIZATION ====================
     override fun initialize() {
         motor.motor.mode = DcMotor.RunMode.STOP_AND_RESET_ENCODER
         motor.motor.mode = DcMotor.RunMode.RUN_WITHOUT_ENCODER
@@ -72,38 +93,70 @@ object Turret : Subsystem {
         lastTargetSeenTime = System.currentTimeMillis()
     }
 
+    // ==================== PHYSICS HELPERS ====================
+    // Get current turret angle in degrees
+    val currentAngleDegrees: Double get() = ticksToDegrees(motor.currentPosition)
+
+    // Get current turret angle in radians
+    fun getYaw(): Double = normalizeAngle(motor.currentPosition * RADIANS_PER_TICK)
+
+    // Convert encoder ticks to degrees
+    fun ticksToDegrees(ticks: Double): Double = ticks * degreesPerTick
+
+    // Convert degrees to encoder ticks
+    fun degreesToTicks(degrees: Double): Int = (degrees / degreesPerTick).toInt()
+
+    // Calculate distance to goal using odometry
+    fun distanceToGoal(): Double {
+        val dx = goalX - currentX
+        val dy = goalY - currentY
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    // Calculate angle to goal (field frame)
+    fun angleToGoalField(): Double {
+        val dx = goalX - currentX
+        val dy = goalY - currentY
+        return Math.toDegrees(atan2(dy, dx))
+    }
+
+    // Calculate required turret angle (robot frame)
+    fun angleToGoalTurret(): Double {
+        val fieldAngle = angleToGoalField()
+        val robotHeadingDeg = Math.toDegrees(currentHeading)
+        var turretAngle = fieldAngle - robotHeadingDeg - 90.0 // -90 for turret offset
+        return normalizeAngleDegrees(turretAngle)
+    }
+
+    // ==================== PERIODIC ====================
     override fun periodic() {
         turretYaw = getYaw()
         updateRobotVelocity()
 
         when (currentState) {
-            State.IDLE -> {
-                motor.power = manualPower.coerceIn(-maxPower, maxPower)
-            }
-            State.MANUAL -> {
-                motor.power = manualPower.coerceIn(-maxPower, maxPower)
-            }
-            State.ODOMETRY -> {
-                aimWithOdometryOnly()
-            }
+            State.IDLE -> motor.power = manualPower.coerceIn(-maxPower, maxPower)
+            State.MANUAL -> motor.power = manualPower.coerceIn(-maxPower, maxPower)
+            State.ODOMETRY -> aimWithOdometryOnly()
             State.RESET_HEADING -> {
                 val currentYaw = getYaw()
                 val error = normalizeAngle(RESET_TARGET_YAW - currentYaw)
-
                 if (abs(error) < 0.3) {
                     motor.power = 0.0
-                    currentState = State.IDLE   // or MANUAL if you want to keep control
+                    currentState = State.IDLE
                     return
                 }
-
-                // Use controller to drive to target (overrides ODO)
                 applyControl(RESET_TARGET_YAW, 0.0)
             }
         }
+
+        // Telemetry
+        telemetry.addData("Turret/Angle", "%.1f°".format(currentAngleDegrees))
+        telemetry.addData("Turret/Target", "%.1f°".format(angleToGoalTurret()))
+        telemetry.addData("Turret/Distance", "%.1f".format(distanceToGoal()))
     }
 
+    // ==================== ODOMETRY AIMING ====================
     private fun updateRobotVelocity() {
-        // Only update when needed (in ODO or RESET)
         if (currentState != State.ODOMETRY && currentState != State.RESET_HEADING) {
             robotAngularVelocity = 0.0
             return
@@ -116,15 +169,15 @@ object Turret : Subsystem {
             return
         }
 
-        val currentHeading = currentHeading
-        if (currentHeading.isNaN() || currentHeading.isInfinite() || !poseValid) {
+        val heading = currentHeading
+        if (heading.isNaN() || heading.isInfinite() || !poseValid) {
             robotAngularVelocity = 0.0
             return
         }
 
-        val deltaHeading = normalizeAngle(currentHeading - lastRobotHeading)
+        val deltaHeading = normalizeAngle(heading - lastRobotHeading)
         robotAngularVelocity = deltaHeading / dt
-        lastRobotHeading = currentHeading
+        lastRobotHeading = heading
         velTimer.reset()
     }
 
@@ -133,7 +186,6 @@ object Turret : Subsystem {
         val currentYaw = getYaw()
 
         controller.goal = KineticState(clampedTarget, targetVelocity)
-
         var power = controller.calculate(KineticState(currentYaw, 0.0))
 
         val errorDeg = Math.toDegrees(abs(clampedTarget - currentYaw))
@@ -148,14 +200,14 @@ object Turret : Subsystem {
 
     fun aimWithOdometryOnly() {
         if (!poseValid) return
+
         val deltaX = goalX - currentX
         val deltaY = goalY - currentY
         val fieldAngle = atan2(deltaY, deltaX)
+
         val robotHeading = if (abs(currentHeading) > 2.0 * PI) Math.toRadians(currentHeading) else currentHeading
         applyControl(normalizeAngle(fieldAngle - robotHeading), -robotAngularVelocity * kV)
     }
-
-    fun getYaw(): Double = normalizeAngle(motor.currentPosition * RADIANS_PER_TICK)
 
     fun normalizeAngle(radians: Double): Double {
         var angle = radians % (2.0 * PI)
@@ -164,15 +216,15 @@ object Turret : Subsystem {
         return angle
     }
 
-    fun aimWithOdometry() { currentState = State.ODOMETRY }
-
-    fun stop() { currentState = State.IDLE; motor.power = 0.0 }
-
-    fun manual() { currentState = State.MANUAL }
-
-    // New: Trigger field-heading reset (call from TeleOp)
-    fun startHeadingReset() {
-        currentState = State.RESET_HEADING
-        manualPower = 0.0
+    fun normalizeAngleDegrees(degrees: Double): Double {
+        var angle = degrees % 360
+        if (angle > 180) angle -= 360
+        if (angle < -180) angle += 360
+        return angle
     }
+
+    fun aimWithOdometry() { currentState = State.ODOMETRY }
+    fun stop() { currentState = State.IDLE; motor.power = 0.0 }
+    fun manual() { currentState = State.MANUAL }
+    fun startHeadingReset() { currentState = State.RESET_HEADING; manualPower = 0.0 }
 }
